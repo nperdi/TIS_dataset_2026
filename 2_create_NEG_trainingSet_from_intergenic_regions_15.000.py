@@ -31,21 +31,26 @@ if refGenome=="hg38":
     chromSizes="data/GENOME/hg38.chrom.sizes"
        
 ###########################################################
+numOfsamples=15000
+relativeStart=0
+relativeEnd=30000
+flankRegionList=[0,100]
+downstreamLength=300
+###########################################################
 
 annotationFile=open(annotationFileName,"r")
 
 negativeFlankBedFileName=workingDir+"negativeRegions.bed"
 negativeFlankBedFile=open(negativeFlankBedFileName,"w")
 
-numOfsamples=15000
+
 
 cnt=0
 try:
     for aLine in annotationFile:
         if len(aLine)<=1:
             continue
-        relativeStart=0
-        relativeEnd=30000
+
         cols=aLine.rstrip().split("\t")
         chrom="chr"+cols[0][3:]
         
@@ -80,16 +85,16 @@ command="bedtools getfasta -name -s -fi "+genome_file+" -bed "+negativeFlankBedF
 print (command)
 os.system(command)
 
-for flankRegion in [100,0]:
+for upstreamFlankRegion in flankRegionList:
     cnt=0
     invalidDict={}
     negativeFlankFaFileName=workingDir+"negativeRegions.fa"
     negativeFlankFaFile=open(negativeFlankFaFileName,"r")
     
-    negativeSorfFaFileName=workingDir+"negative_trainingSet_Flank-"+str(flankRegion)+".fa"
+    negativeSorfFaFileName=workingDir+"negative_trainingSet_Flank-"+str(upstreamFlankRegion)+".fa"
     negativeSorfFaFile=open(negativeSorfFaFileName,"w")
     
-    negativeSorfBedFileName=workingDir+"negative_trainingSet_Flank-"+str(flankRegion)+".Bed"
+    negativeSorfBedFileName=workingDir+"negative_trainingSet_Flank-"+str(upstreamFlankRegion)+".Bed"
     negativeSorfBedFile=open(negativeSorfBedFileName,"w")
     
     try:
@@ -114,18 +119,18 @@ for flankRegion in [100,0]:
                     if aPos-prevpos<500:
                         continue
                     prevpos=aPos
-                    if ((aPos>flankRegion) and (aPos<len(aLine)-501)):
-                        orfSim=aLine.upper()[aPos-flankRegion:aPos+300]
+                    if ((aPos>upstreamFlankRegion) and (aPos<len(aLine)-501)):
+                        orfSim=aLine.upper()[aPos-upstreamFlankRegion:aPos+downstreamLength]
                         if  "N" in orfSim or "n" in orfSim :
                             #print (orfSim),
                             continue
                         #print (tisConcensusSeq)
                         if headerStrand=="+":
-                            orfStart=headerStart+aPos-flankRegion
-                            orfEnd=headerStart+aPos+300
+                            orfStart=headerStart+aPos-upstreamFlankRegion
+                            orfEnd=headerStart+aPos+downstreamLength
                         if headerStrand=="-":
-                            orfStart=headerEnd-aPos-300
-                            orfEnd=headerEnd-aPos+flankRegion
+                            orfStart=headerEnd-aPos-downstreamLength
+                            orfEnd=headerEnd-aPos+upstreamFlankRegion
                                      
                         negativeSorfFaFile.write(">"+headerName+":"+headerChrom+":"+str(orfStart)+":"+str(orfEnd)+":"+headerScore+":"+headerStrand+"\n"+orfSim+"\n")
                         orfBedAnnotation="\t".join([headerChrom,str(orfStart),str(orfEnd),headerName,headerScore,headerStrand])
