@@ -15,3 +15,5 @@ samtools faidx data/GENOME/hg38.fa
 
 wget -O data/ensembl/Homo_sapiens.GRCh38.116.gtf.gz https://ftp.ensembl.org/pub/release-116/vertebrates/gtf/homo_sapiens/Homo_sapiens.GRCh38.116.gtf.gz
 wget -O data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+gunzip data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+samtools faidx data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa
