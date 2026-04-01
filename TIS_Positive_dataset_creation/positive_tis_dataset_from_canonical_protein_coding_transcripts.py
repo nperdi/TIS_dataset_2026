@@ -19,7 +19,7 @@ DOWNSTREAM = 500
 
 OUT_PREFIX = "output/canonical_trancripts_tis_window"
 
-OUT_PREFIX = "output/intergenic_positive_TIS_upstream-" + str(UPSTREAM) + "_downstream-" + str(DOWNSTREAM)
+OUT_PREFIX = "output/canonical_transcripts_positive_TIS_upstream-" + str(UPSTREAM) + "_downstream-" + str(DOWNSTREAM)
 
 ###############################################################################
 # ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ
