@@ -1,255 +1,185 @@
-"""
-Script purpose:
-This script extracts candidate negative TIS examples from intergenic genomic regions.
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-Main steps:
-1. Read a BED file containing filtered intergenic regions.
-2. Extract genomic subregions from the reference genome for a fixed window
-   starting at each intergenic region.
-3. Save these regions in BED format and retrieve their DNA sequences
-   using bedtools getfasta.
-4. Scan each extracted sequence for ATG codons.
-5. Around each ATG, build a fixed TIS-centered sequence window consisting of:
-   - an upstream context of variable length
-   - the ATG codon
-   - a fixed downstream context
-6. Keep only candidate windows that:
-   - fit completely inside the extracted intergenic sequence
-   - do not contain ambiguous base 'N'
-   - optionally do not contain an in-frame stop codon in the downstream window
-7. Save the accepted candidate TIS windows in:
-   - FASTA format
-   - BED format
-8. Repeat the process for multiple upstream context lengths.
-
-Inputs:
-- BED file with filtered intergenic regions
-- Reference genome FASTA file
-
-Outputs:
-- BED file with extracted intergenic regions
-- FASTA file with extracted intergenic region sequences
-- FASTA files with candidate intergenic negative TIS windows
-- BED files with candidate intergenic negative TIS windows
-
-Notes:
-- The script is designed to generate negative TIS examples from intergenic DNA.
-- Each candidate sequence is centered on an ATG and includes a configurable
-  upstream and downstream context.
-- If forbidInFrameStopInDownstreamWindow is enabled, candidate windows with
-  an in-frame stop codon shortly after the ATG are excluded.
-- The number of extracted regions and resulting candidate TIS examples is
-  limited by numOfsamples.
-"""
-
-import sys
-sys.path.append('../lib')
-# from nMersDB import *
 import os
-genome_file = "../data/GENOME/hg38.fa"
-annotationFileName = "../intergenic_region_parsing/output/dist_GT_20000_LT_50000/final/6_Human_GRCh38_RefSeq_Curated_distGT_20000_LT_50000_chrFilter_complement_merge_slop_sorted_chrFilter.bed"
-workingDir = "output/intergenic_TIS/"
-command = "mkdir -p " + workingDir
-os.system(command)
+import subprocess
 
 ###########################################################
-
-
-    
-
-###########################################################
-numOfsamples = 15000
-relativeStart = 0
-relativeEnd = 30000
-
-upstreamContextLengthList = [100, 300]
-downstreamContextLength = 500
-
-forbidInFrameStopInDownstreamWindow = True
-stopCodons = {"TAA", "TAG", "TGA"}
+# Parameters
 ###########################################################
 
-annotationFile = open(annotationFileName, "r")
+genome_file = "../data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
+annotation_file_name = "../intergenic_region_parsing/output/dist_GT_10000_LT_150000/final/6_Homo_sapiens.GRCh38.116_distGT_10000_LT_150000.bed"
+working_dir = "output/intergenic_TIS/"
 
-intergenicRegionBedFileName = workingDir + "intergenicRegions.bed"
-intergenicRegionBedFile = open(intergenicRegionBedFileName, "w")
+num_of_samples = 15000 # maximum number of samples
+relative_start = 0     # in each intergenic region only a subregion is processed.This is the start processing position 
+relative_end = 80000   # in each intergenic region only a subregion is processed.This is the end processing position 
 
-cnt = 0
-try:
-    for aLine in annotationFile:
-        if len(aLine) <= 1:
+upstream_context_length_list = [100, 300, 500] # the upstream length. run for a list of lengths. Each one produce diferect file
+downstream_context_length = 500                # the downstream length
+
+forbid_in_frame_stop_in_downstream_window = True # flag for check in frame stop codon
+stop_codons = {"TAA", "TAG", "TGA"}              #stop codon list  
+
+###########################################################
+# Prepare output directory
+###########################################################
+
+os.makedirs(working_dir, exist_ok=True)
+
+intergenic_region_bed_file_name = working_dir + "intergenicRegions.bed"
+intergenic_region_fa_file_name = working_dir + "intergenicRegions.fa"
+
+###########################################################
+# Step 1: Build BED file with extracted intergenic regions
+# for each subregion from relativ start to relative end
+###########################################################
+
+count_regions = 0
+
+with open(annotation_file_name, "r") as annotation_file, open(intergenic_region_bed_file_name, "w") as intergenic_region_bed_file:
+    for line in annotation_file:
+        if not line.strip():
             continue
 
-        cols = aLine.rstrip().split("\t")
-        chrom = "chr" + cols[0][3:]
+        cols = line.rstrip().split("\t")
+        chrom = cols[0]
         start = int(cols[1])
         end = int(cols[2])
-        name = cols[3]
 
-        currentRelativeEnd = relativeEnd
-        if end - start < currentRelativeEnd:
-            currentRelativeEnd = end - start
+        if len(cols) > 3:
+            name = cols[3]
+        else:
+            name = f"region_{count_regions + 1}"
 
-        extractRegionStart = start + relativeStart
-        extractRegionEnd = start + currentRelativeEnd
+        current_relative_end = min(relative_end, end - start)
+        extract_region_start = start + relative_start
+        extract_region_end = start + current_relative_end
 
-        extractRegionExtendedBedFileLine = "\t".join(
-            map(
-                str,
-                [
-                    chrom,
-                    extractRegionStart,
-                    extractRegionEnd,
-                    name + ":" + chrom + ":" + str(extractRegionStart) + ":" + str(extractRegionEnd) + ":" + "0" + ":" + "+"
-                ]
-            )
-        )
-        intergenicRegionBedFile.write(extractRegionExtendedBedFileLine + "\n")
+        region_name = f"{name}:{chrom}:{extract_region_start}:{extract_region_end}:0:+"
+        intergenic_region_bed_file.write(f"{chrom}\t{extract_region_start}\t{extract_region_end}\t{region_name}\n")
 
-        cnt += 1
-        if cnt >= numOfsamples:
-            raise StopIteration
+        count_regions += 1
+        if count_regions >= num_of_samples:
+            break
 
-except StopIteration:
-    pass
+print("Intergenic regions written:", count_regions)
+print("BED:", intergenic_region_bed_file_name)
 
-annotationFile.close()
-intergenicRegionBedFile.close()
+###########################################################
+# Step 2: Extract FASTA from BED
+###########################################################
 
-intergenicRegionFaFileName = workingDir + "intergenicRegions.fa"
-command = "bedtools getfasta -name -s -fi " + genome_file + " -bed " + intergenicRegionBedFileName + " -fo " + intergenicRegionFaFileName
-print(command)
-os.system(command)
+command = "bedtools getfasta -name -s -fi " + genome_file + " -bed " + intergenic_region_bed_file_name + " -fo " + intergenic_region_fa_file_name
+print("[CMD]", command)
+result = subprocess.run(command, shell=True)
+if result.returncode != 0:
+    raise RuntimeError("Command failed:\n" + command)
 
-for upstreamContextLength in upstreamContextLengthList:
-    cnt = 0
+###########################################################
+# Step 3: Scan for ATG and create candidate negative TIS
+###########################################################
 
-    intergenicRegionFaFile = open(intergenicRegionFaFileName, "r")
+for upstream_context_length in upstream_context_length_list:
+    count_tis = 0
 
-    intergenicTisFaFileName = (
-        workingDir
-        + "intergenic_negative_TIS_up"
-        + str(upstreamContextLength)
-        + "_down"
-        + str(downstreamContextLength)
-        + ".fa"
-    )
-    intergenicTisFaFile = open(intergenicTisFaFileName, "w")
+    intergenic_tis_fa_file_name = working_dir + "intergenic_negative_TIS_up" + str(upstream_context_length) + "_down" + str(downstream_context_length) + ".fa"
+    intergenic_tis_bed_file_name = working_dir + "intergenic_negative_TIS_up" + str(upstream_context_length) + "_down" + str(downstream_context_length) + ".bed"
 
-    intergenicTisBedFileName = (
-        workingDir
-        + "intergenic_negative_TIS_up"
-        + str(upstreamContextLength)
-        + "_down"
-        + str(downstreamContextLength)
-        + ".bed"
-    )
-    intergenicTisBedFile = open(intergenicTisBedFileName, "w")
+    with open(intergenic_region_fa_file_name, "r") as intergenic_region_fa_file, \
+         open(intergenic_tis_fa_file_name, "w") as intergenic_tis_fa_file, \
+         open(intergenic_tis_bed_file_name, "w") as intergenic_tis_bed_file:
 
-    try:
-        for aLine in intergenicRegionFaFile:
-            aLine = aLine.rstrip().upper()
+        header_name = ""
+        header_chrom = ""
+        header_start = 0
+        header_end = 0
+        header_score = "0"
+        header_strand = "+"
 
-            if len(aLine) <= 0:
+        stop_processing = False
+
+        for line in intergenic_region_fa_file:
+            line = line.rstrip().upper()
+
+            if not line:
                 continue
 
-            if aLine[0] == ">":
-                header = aLine
-                headerCols = header[1:].rstrip().split(":")
-                headerName = headerCols[0]
-                headerChrom = "chr" + headerCols[1][3:]
-                headerStart = int(headerCols[2])
-                headerEnd = int(headerCols[3])
-                headerScore = headerCols[4]
-                headerStrand = headerCols[5]
-            else:
-                searchPos = 0
+            if line.startswith(">"):
+                header = line[1:]
+                header_cols = header.split(":")
+                header_name = header_cols[0]
+                header_chrom = header_cols[1]
+                header_start = int(header_cols[2])
+                header_end = int(header_cols[3])
+                header_score = header_cols[4]
+                header_strand = header_cols[5]
+                continue
 
-                while True:
-                    aPos = aLine.find("ATG", searchPos)
-                    if aPos == -1:
-                        break
+            seq = line
+            search_pos = 0 #start from the begining
 
-                    windowStart = aPos - upstreamContextLength
-                    windowEnd = aPos + 3 + downstreamContextLength
+            while True:
+                atg_pos = seq.find("ATG", search_pos)
+                if atg_pos == -1:
+                    break
 
-                    if windowStart < 0 or windowEnd > len(aLine):
-                        searchPos = aPos + 3
+                window_start = atg_pos - upstream_context_length
+                window_end = atg_pos + 3 + downstream_context_length
+
+                if window_start < 0 or window_end > len(seq):
+                    search_pos = atg_pos + 3
+                    continue
+
+                tis_window_seq = seq[window_start:window_end]
+
+                if "N" in tis_window_seq:
+                    search_pos = atg_pos + 3
+                    continue
+
+                if forbid_in_frame_stop_in_downstream_window:
+                    has_in_frame_stop = False
+                    scan_end = min(atg_pos + 3 + downstream_context_length, len(seq))
+
+                    for i in range(atg_pos + 3, scan_end - 2, 3):
+                        codon = seq[i:i+3]
+                        if codon in stop_codons:
+                            has_in_frame_stop = True
+                            break
+
+                    if has_in_frame_stop:
+                        search_pos = atg_pos + 3
                         continue
 
-                    if forbidInFrameStopInDownstreamWindow:
-                        hasInFrameStop = False
-                        scanEnd = min(aPos + 3 + downstreamContextLength, len(aLine))
+                if header_strand == "+":
+                    tis_start = header_start + window_start
+                    tis_end = header_start + window_end
+                elif header_strand == "-":
+                    tis_start = header_end - window_end
+                    tis_end = header_end - window_start
+                else:
+                    search_pos = atg_pos + 3
+                    continue
 
-                        for i in range(aPos + 3, scanEnd - 2, 3):
-                            codon = aLine[i:i+3]
-                            if codon in stopCodons:
-                                hasInFrameStop = True
-                                break
+                tis_name = header_name + ":" + header_chrom + ":" + str(tis_start) + ":" + str(tis_end) + ":ATGpos=" + str(atg_pos)
 
-                        if hasInFrameStop:
-                            searchPos = aPos + 3
-                            continue
+                intergenic_tis_fa_file.write(">" + tis_name + ":" + header_score + ":" + header_strand + "\n")
+                intergenic_tis_fa_file.write(tis_window_seq + "\n")
 
-                    tisWindowSeq = aLine[windowStart:windowEnd]
+                intergenic_tis_bed_file.write(header_chrom + "\t" + str(tis_start) + "\t" + str(tis_end) + "\t" + tis_name + "\t" + header_score + "\t" + header_strand + "\n")
 
-                    if "N" in tisWindowSeq:
-                        searchPos = aPos + 3
-                        continue
+                count_tis += 1
+                if count_tis >= num_of_samples:
+                    stop_processing = True
+                    break
 
-                    if headerStrand == "+":
-                        tisStart = headerStart + windowStart
-                        tisEnd = headerStart + windowEnd
-                    elif headerStrand == "-":
-                        tisStart = headerEnd - windowEnd
-                        tisEnd = headerEnd - windowStart
-                    else:
-                        searchPos = aPos + 3
-                        continue
+                search_pos = window_end
 
-                    tisName = (
-                        headerName
-                        + ":"
-                        + headerChrom
-                        + ":"
-                        + str(tisStart)
-                        + ":"
-                        + str(tisEnd)
-                        + ":ATGpos="
-                        + str(aPos)
-                    )
+            if stop_processing:
+                break
 
-                    intergenicTisFaFile.write(
-                        ">"
-                        + tisName
-                        + ":"
-                        + headerScore
-                        + ":"
-                        + headerStrand
-                        + "\n"
-                        + tisWindowSeq
-                        + "\n"
-                    )
-
-                    tisBedAnnotation = "\t".join(
-                        [headerChrom, str(tisStart), str(tisEnd), tisName, headerScore, headerStrand]
-                    )
-                    intergenicTisBedFile.write(tisBedAnnotation + "\n")
-
-                    cnt += 1
-                    if cnt >= numOfsamples:
-                        raise StopIteration
-
-                    searchPos = aPos + 3
-
-    except StopIteration:
-        pass
-
-    intergenicRegionFaFile.close()
-    intergenicTisFaFile.close()
-    intergenicTisBedFile.close()
-
-    print("Finished upstream =", upstreamContextLength)
-    print("  FASTA:", intergenicTisFaFileName)
-    print("  BED  :", intergenicTisBedFileName)
-    print("  Count:", cnt)
+    print("Finished upstream =", upstream_context_length)
+    print("  FASTA:", intergenic_tis_fa_file_name)
+    print("  BED  :", intergenic_tis_bed_file_name)
+    print("  Count:", count_tis)
