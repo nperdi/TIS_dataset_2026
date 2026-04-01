@@ -14,10 +14,10 @@ from collections import defaultdict
 GTF_FILE = "../data/ensembl/Homo_sapiens.GRCh38.116.gtf"
 GENOME_FASTA = "../data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
 
-UPSTREAM = 100
-DOWNSTREAM = 100
+UPSTREAM = 500
+DOWNSTREAM = 500
 
-OUT_PREFIX = "output/canonical_tis_windows"
+OUT_PREFIX = "output/canonical_trancripts_tis_window"
 
 ###############################################################################
 # ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ
@@ -30,10 +30,6 @@ def open_maybe_gzip(path):
 
 
 def parse_gtf_attributes(attr_text):
-    """
-    Parse του 9ου πεδίου του GTF.
-    Κρατά και πολλαπλά tag entries.
-    """
     attrs = {}
     tags = []
 
@@ -58,10 +54,6 @@ def wrap_fasta(seq, width=60):
 
 
 def load_fai_lengths(fai_file):
-    """
-    Διαβάζει το .fai index και επιστρέφει:
-    chrom -> length
-    """
     chrom_lengths = {}
     with open(fai_file, "r", encoding="utf-8") as fh:
         for line in fh:
@@ -72,33 +64,7 @@ def load_fai_lengths(fai_file):
     return chrom_lengths
 
 
-def normalize_chrom_name(chrom, fasta_keys):
-    """
-    Προσπαθεί να ταιριάξει chromosome name από GTF στο FASTA.
-    """
-    if chrom in fasta_keys:
-        return chrom
-
-    if "chr" + chrom in fasta_keys:
-        return "chr" + chrom
-
-    if chrom.startswith("chr") and chrom[3:] in fasta_keys:
-        return chrom[3:]
-
-    if chrom in ("MT", "M") and "chrM" in fasta_keys:
-        return "chrM"
-
-    if chrom == "chrM" and "MT" in fasta_keys:
-        return "MT"
-
-    return None
-
-
 def fetch_sequence_samtools(fasta_file, chrom, start_1based, end_1based):
-    """
-    Παίρνει sequence με samtools faidx.
-    Οι συντεταγμένες είναι 1-based inclusive.
-    """
     region = f"{chrom}:{start_1based}-{end_1based}"
 
     result = subprocess.run(
@@ -133,18 +99,16 @@ def main():
     output_bed = OUT_PREFIX + ".bed"
     output_fasta = OUT_PREFIX + ".fa"
 
-    # -------------------------------------------------------------------------
-    # 0. Διάβασε FASTA index
-    # -------------------------------------------------------------------------
+    output_no_overlap_tsv = OUT_PREFIX + ".no_overlap.tsv"
+    output_no_overlap_bed = OUT_PREFIX + ".no_overlap.bed"
+    output_no_overlap_fasta = OUT_PREFIX + ".no_overlap.fa"
+
     chrom_lengths = load_fai_lengths(genome_fai)
     fasta_keys = set(chrom_lengths.keys())
 
     print(f"[INFO] FASTA sequences in index: {len(fasta_keys)}")
     print(f"[INFO] Example FASTA names: {list(chrom_lengths.keys())[:10]}")
 
-    # -------------------------------------------------------------------------
-    # 1. Βρες canonical protein-coding transcripts
-    # -------------------------------------------------------------------------
     canonical_transcripts = {}
     skipped_no_chrom_match = 0
 
@@ -179,8 +143,7 @@ def main():
             if "Ensembl_canonical" not in tags:
                 continue
 
-            chrom_norm = normalize_chrom_name(chrom, fasta_keys)
-            if chrom_norm is None:
+            if chrom is None:
                 skipped_no_chrom_match += 1
                 continue
 
@@ -190,16 +153,13 @@ def main():
                 "transcript_id": transcript_id,
                 "transcript_name": transcript_name,
                 "chrom_gtf": chrom,
-                "chrom_fasta": chrom_norm,
+                "chrom_fasta": chrom,
                 "strand": strand,
             }
 
     print(f"[INFO] Canonical protein-coding transcripts kept: {len(canonical_transcripts)}")
     print(f"[INFO] Skipped transcripts due to chromosome mismatch: {skipped_no_chrom_match}")
 
-    # -------------------------------------------------------------------------
-    # 2. Βρες start_codon για αυτά τα transcripts
-    # -------------------------------------------------------------------------
     start_codons = defaultdict(list)
 
     with open_maybe_gzip(GTF_FILE) as fh:
@@ -224,138 +184,209 @@ def main():
 
             start_codons[transcript_id].append((int(start), int(end)))
 
-    # -------------------------------------------------------------------------
-    # 3. Γράψε TSV / BED / FASTA
-    # -------------------------------------------------------------------------
-    written = 0
+    records = []
     skipped_no_start = 0
     skipped_bad_seq = 0
 
-    with open(output_tsv, "w", encoding="utf-8") as tsv, \
-         open(output_bed, "w", encoding="utf-8") as bed, \
-         open(output_fasta, "w", encoding="utf-8") as fasta:
+    for transcript_id, meta in canonical_transcripts.items():
+        coords = start_codons.get(transcript_id, [])
+        if not coords:
+            skipped_no_start += 1
+            continue
 
-        tsv.write(
-            "\t".join([
-                "gene_id",
-                "gene_name",
-                "transcript_id",
-                "transcript_name",
-                "chrom_gtf",
-                "chrom_fasta",
-                "strand",
-                "tis_genomic_pos",
-                "window_start_1based",
-                "window_end_1based",
-                "bed_start_0based",
-                "bed_end",
-                "upstream",
-                "downstream",
-                "window_length"
-            ]) + "\n"
-        )
+        chrom_gtf = meta["chrom_gtf"]
+        chrom_fasta = meta["chrom_fasta"]
+        strand = meta["strand"]
 
-        for transcript_id, meta in canonical_transcripts.items():
-            coords = start_codons.get(transcript_id, [])
-            if not coords:
-                skipped_no_start += 1
-                continue
+        starts = [x[0] for x in coords]
+        ends = [x[1] for x in coords]
 
-            chrom_gtf = meta["chrom_gtf"]
-            chrom_fasta = meta["chrom_fasta"]
-            strand = meta["strand"]
+        if strand == "+":
+            tis = min(starts)
+            window_start = tis - UPSTREAM
+            window_end = tis + DOWNSTREAM - 1
+        elif strand == "-":
+            tis = max(ends)
+            window_start = tis - DOWNSTREAM + 1
+            window_end = tis + UPSTREAM
+        else:
+            skipped_bad_seq += 1
+            continue
 
-            starts = [x[0] for x in coords]
-            ends = [x[1] for x in coords]
+        chrom_len = chrom_lengths[chrom_fasta]
 
-            if strand == "+":
-                tis = min(starts)
-                window_start = tis - UPSTREAM
-                window_end = tis + DOWNSTREAM - 1
-            elif strand == "-":
-                tis = max(ends)
-                window_start = tis - DOWNSTREAM + 1
-                window_end = tis + UPSTREAM
-            else:
-                skipped_bad_seq += 1
-                continue
+        window_start = max(1, window_start)
+        window_end = min(chrom_len, window_end)
 
-            chrom_len = chrom_lengths[chrom_fasta]
+        if window_start > window_end:
+            skipped_bad_seq += 1
+            continue
 
-            window_start = max(1, window_start)
-            window_end = min(chrom_len, window_end)
+        try:
+            seq = fetch_sequence_samtools(GENOME_FASTA, chrom_fasta, window_start, window_end)
+        except Exception as e:
+            print(f"[WARN] Could not fetch sequence for {transcript_id}: {e}")
+            skipped_bad_seq += 1
+            continue
 
-            if window_start > window_end:
-                skipped_bad_seq += 1
-                continue
+        if strand == "-":
+            seq = reverse_complement(seq)
 
-            try:
-                seq = fetch_sequence_samtools(
-                    GENOME_FASTA,
-                    chrom_fasta,
-                    window_start,
-                    window_end
-                )
-            except Exception as e:
-                print(f"[WARN] Could not fetch sequence for {transcript_id}: {e}")
-                skipped_bad_seq += 1
-                continue
+        bed_start = window_start - 1
+        bed_end = window_end
+        name = f"{meta['transcript_id']}|{meta['gene_name']}"
 
-            if strand == "-":
-                seq = reverse_complement(seq)
+        records.append({
+            "gene_id": meta["gene_id"],
+            "gene_name": meta["gene_name"],
+            "transcript_id": meta["transcript_id"],
+            "transcript_name": meta["transcript_name"],
+            "chrom_gtf": chrom_gtf,
+            "chrom_fasta": chrom_fasta,
+            "strand": strand,
+            "tis": tis,
+            "window_start": window_start,
+            "window_end": window_end,
+            "bed_start": bed_start,
+            "bed_end": bed_end,
+            "upstream": UPSTREAM,
+            "downstream": DOWNSTREAM,
+            "seq": seq,
+            "name": name
+        })
 
-            bed_start = window_start - 1
-            bed_end = window_end
+    with open(output_tsv, "w", encoding="utf-8") as tsv, open(output_bed, "w", encoding="utf-8") as bed, open(output_fasta, "w", encoding="utf-8") as fasta:
+        tsv.write("\t".join([
+            "gene_id",
+            "gene_name",
+            "transcript_id",
+            "transcript_name",
+            "chrom_gtf",
+            "chrom_fasta",
+            "strand",
+            "tis_genomic_pos",
+            "window_start_1based",
+            "window_end_1based",
+            "bed_start_0based",
+            "bed_end",
+            "upstream",
+            "downstream",
+            "window_length"
+        ]) + "\n")
 
-            name = f"{meta['transcript_id']}|{meta['gene_name']}"
+        for rec in records:
+            tsv.write("\t".join(map(str, [
+                rec["gene_id"],
+                rec["gene_name"],
+                rec["transcript_id"],
+                rec["transcript_name"],
+                rec["chrom_gtf"],
+                rec["chrom_fasta"],
+                rec["strand"],
+                rec["tis"],
+                rec["window_start"],
+                rec["window_end"],
+                rec["bed_start"],
+                rec["bed_end"],
+                rec["upstream"],
+                rec["downstream"],
+                len(rec["seq"])
+            ])) + "\n")
 
-            tsv.write(
-                "\t".join(map(str, [
-                    meta["gene_id"],
-                    meta["gene_name"],
-                    meta["transcript_id"],
-                    meta["transcript_name"],
-                    chrom_gtf,
-                    chrom_fasta,
-                    strand,
-                    tis,
-                    window_start,
-                    window_end,
-                    bed_start,
-                    bed_end,
-                    UPSTREAM,
-                    DOWNSTREAM,
-                    len(seq)
-                ])) + "\n"
-            )
+            bed.write("\t".join(map(str, [
+                rec["chrom_fasta"],
+                rec["bed_start"],
+                rec["bed_end"],
+                rec["name"],
+                0,
+                rec["strand"]
+            ])) + "\n")
 
-            bed.write(
-                "\t".join(map(str, [
-                    chrom_fasta,
-                    bed_start,
-                    bed_end,
-                    name,
-                    0,
-                    strand
-                ])) + "\n"
-            )
-
-            fasta_header = (
-                f">{meta['gene_id']}|{meta['gene_name']}|"
-                f"{meta['transcript_id']}|{meta['transcript_name']}|"
-                f"{chrom_fasta}:{window_start}-{window_end}({strand})|TIS={tis}"
-            )
+            fasta_header = f">{rec['gene_id']}|{rec['gene_name']}|{rec['transcript_id']}|{rec['transcript_name']}|{rec['chrom_fasta']}:{rec['window_start']}-{rec['window_end']}({rec['strand']})|TIS={rec['tis']}"
             fasta.write(fasta_header + "\n")
-            fasta.write(wrap_fasta(seq) + "\n")
+            fasta.write(wrap_fasta(rec["seq"]) + "\n")
 
-            written += 1
+    records_sorted = sorted(records, key=lambda x: (x["chrom_fasta"], x["bed_start"], x["bed_end"]))
 
-    print(f"[INFO] Written entries: {written}")
+    filtered_records = []
+    last_chrom = None
+    last_end = -1
+
+    for rec in records_sorted:
+        chrom = rec["chrom_fasta"]
+        start = rec["bed_start"]
+        end = rec["bed_end"]
+
+        if chrom != last_chrom:
+            filtered_records.append(rec)
+            last_chrom = chrom
+            last_end = end
+        else:
+            if start >= last_end:
+                filtered_records.append(rec)
+                last_end = end
+
+    with open(output_no_overlap_tsv, "w", encoding="utf-8") as tsv, open(output_no_overlap_bed, "w", encoding="utf-8") as bed, open(output_no_overlap_fasta, "w", encoding="utf-8") as fasta:
+        tsv.write("\t".join([
+            "gene_id",
+            "gene_name",
+            "transcript_id",
+            "transcript_name",
+            "chrom_gtf",
+            "chrom_fasta",
+            "strand",
+            "tis_genomic_pos",
+            "window_start_1based",
+            "window_end_1based",
+            "bed_start_0based",
+            "bed_end",
+            "upstream",
+            "downstream",
+            "window_length"
+        ]) + "\n")
+
+        for rec in filtered_records:
+            tsv.write("\t".join(map(str, [
+                rec["gene_id"],
+                rec["gene_name"],
+                rec["transcript_id"],
+                rec["transcript_name"],
+                rec["chrom_gtf"],
+                rec["chrom_fasta"],
+                rec["strand"],
+                rec["tis"],
+                rec["window_start"],
+                rec["window_end"],
+                rec["bed_start"],
+                rec["bed_end"],
+                rec["upstream"],
+                rec["downstream"],
+                len(rec["seq"])
+            ])) + "\n")
+
+            bed.write("\t".join(map(str, [
+                rec["chrom_fasta"],
+                rec["bed_start"],
+                rec["bed_end"],
+                rec["name"],
+                0,
+                rec["strand"]
+            ])) + "\n")
+
+            fasta_header = f">{rec['gene_id']}|{rec['gene_name']}|{rec['transcript_id']}|{rec['transcript_name']}|{rec['chrom_fasta']}:{rec['window_start']}-{rec['window_end']}({rec['strand']})|TIS={rec['tis']}"
+            fasta.write(fasta_header + "\n")
+            fasta.write(wrap_fasta(rec["seq"]) + "\n")
+
+    print(f"[INFO] Written entries (all): {len(records)}")
+    print(f"[INFO] Written entries (no overlap): {len(filtered_records)}")
     print(f"[INFO] Skipped (no start_codon): {skipped_no_start}")
     print(f"[INFO] Skipped (bad/failed sequence): {skipped_bad_seq}")
-    print(f"[INFO] TSV:   {output_tsv}")
-    print(f"[INFO] BED:   {output_bed}")
-    print(f"[INFO] FASTA: {output_fasta}")
+    print(f"[INFO] TSV:             {output_tsv}")
+    print(f"[INFO] BED:             {output_bed}")
+    print(f"[INFO] FASTA:           {output_fasta}")
+    print(f"[INFO] TSV no overlap:  {output_no_overlap_tsv}")
+    print(f"[INFO] BED no overlap:  {output_no_overlap_bed}")
+    print(f"[INFO] FASTA no overlap:{output_no_overlap_fasta}")
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import subprocess
 ###########################################################
 
 genome_file = "../data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
-annotation_file_name = "../intergenic_region_parsing/output/dist_GT_10000_LT_150000/final/6_Homo_sapiens.GRCh38.116_distGT_10000_LT_150000.bed"
+annotation_file_name = "../intergenic_region_parsing/output/dist_GT_10000_LT_150000/final/6_Homo_sapiens.GRCh38.116_intergenic_regions_distGT_10000_LT_150000.bed"
 working_dir = "output/intergenic_TIS/"
 
 num_of_samples = 15000 # maximum number of samples
@@ -28,8 +28,8 @@ stop_codons = {"TAA", "TAG", "TGA"}              #stop codon list
 
 os.makedirs(working_dir, exist_ok=True)
 
-intergenic_region_bed_file_name = working_dir + "intergenicRegions.bed"
-intergenic_region_fa_file_name = working_dir + "intergenicRegions.fa"
+intergenic_subregion_bed_file_name = working_dir + "intergenic_subregions.bed"
+intergenic_subregion_fa_file_name = working_dir  + "intergenic_subregions.fa"
 
 ###########################################################
 # Step 1: Build BED file with extracted intergenic regions
@@ -38,7 +38,7 @@ intergenic_region_fa_file_name = working_dir + "intergenicRegions.fa"
 
 count_regions = 0
 
-with open(annotation_file_name, "r") as annotation_file, open(intergenic_region_bed_file_name, "w") as intergenic_region_bed_file:
+with open(annotation_file_name, "r") as annotation_file, open(intergenic_subregion_bed_file_name, "w") as intergenic_region_bed_file:
     for line in annotation_file:
         if not line.strip():
             continue
@@ -65,13 +65,13 @@ with open(annotation_file_name, "r") as annotation_file, open(intergenic_region_
             break
 
 print("Intergenic regions written:", count_regions)
-print("BED:", intergenic_region_bed_file_name)
+print("BED:", intergenic_subregion_bed_file_name)
 
 ###########################################################
 # Step 2: Extract FASTA from BED
 ###########################################################
 
-command = "bedtools getfasta -name -s -fi " + genome_file + " -bed " + intergenic_region_bed_file_name + " -fo " + intergenic_region_fa_file_name
+command = "bedtools getfasta -name -s -fi " + genome_file + " -bed " + intergenic_subregion_bed_file_name + " -fo " + intergenic_subregion_fa_file_name
 print("[CMD]", command)
 result = subprocess.run(command, shell=True)
 if result.returncode != 0:
@@ -84,10 +84,10 @@ if result.returncode != 0:
 for upstream_context_length in upstream_context_length_list:
     count_tis = 0
 
-    intergenic_tis_fa_file_name = working_dir + "intergenic_negative_TIS_up" + str(upstream_context_length) + "_down" + str(downstream_context_length) + ".fa"
-    intergenic_tis_bed_file_name = working_dir + "intergenic_negative_TIS_up" + str(upstream_context_length) + "_down" + str(downstream_context_length) + ".bed"
+    intergenic_tis_fa_file_name = working_dir +  "intergenic_negative_TIS_upstream-" + str(upstream_context_length) + "_downstream-" + str(downstream_context_length) + ".fa"
+    intergenic_tis_bed_file_name = working_dir + "intergenic_negative_TIS_upstream-" + str(upstream_context_length) + "_downstream-" + str(downstream_context_length) + ".bed"
 
-    with open(intergenic_region_fa_file_name, "r") as intergenic_region_fa_file, \
+    with open(intergenic_subregion_fa_file_name, "r") as intergenic_region_fa_file, \
          open(intergenic_tis_fa_file_name, "w") as intergenic_tis_fa_file, \
          open(intergenic_tis_bed_file_name, "w") as intergenic_tis_bed_file:
 
