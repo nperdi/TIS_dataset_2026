@@ -21,8 +21,8 @@ chrom_sizes_file = "../data/ensembl/hg38.ensembl.chrom.size"
 feature_type = "gene"
 slop_bp = 2000
 
-min_distance = 10000  # min length of extracted regions
-max_distance = 150000 # max length of extracted regions
+min_distance = 4000  # min length of extracted regions
+max_distance = 300000 # max length of extracted regions
 use_minmax = True     # if use max lengrh restriction
 
 allowed_chromosomes = set([str(i) for i in range(1, 23)] + ["X", "Y"])

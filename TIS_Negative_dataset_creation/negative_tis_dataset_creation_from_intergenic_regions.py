@@ -14,7 +14,7 @@ working_dir = "output/intergenic_TIS/"
 
 num_of_samples = 100000 # maximum number of samples
 relative_start = 0     # in each intergenic region only a subregion is processed.This is the start processing position 
-relative_end = 150000   # in each intergenic region only a subregion is processed.This is the end processing position 
+relative_end = 80000   # in each intergenic region only a subregion is processed.This is the end processing position 
 
 upstream_context_length_list = [100, 300, 500] # the upstream length. run for a list of lengths. Each one produce diferect file
 downstream_context_length = 500                # the downstream length
