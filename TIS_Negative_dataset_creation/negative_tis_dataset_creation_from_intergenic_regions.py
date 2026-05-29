@@ -12,9 +12,9 @@ genome_file = "../data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
 annotation_file_name = "../intergenic_region_parsing/output/dist_GT_10000_LT_150000/final/6_Homo_sapiens.GRCh38.116_intergenic_regions_distGT_10000_LT_150000.bed"
 working_dir = "output/intergenic_TIS/"
 
-num_of_samples = 15000 # maximum number of samples
+num_of_samples = 100000 # maximum number of samples
 relative_start = 0     # in each intergenic region only a subregion is processed.This is the start processing position 
-relative_end = 80000   # in each intergenic region only a subregion is processed.This is the end processing position 
+relative_end = 150000   # in each intergenic region only a subregion is processed.This is the end processing position 
 
 upstream_context_length_list = [100, 300, 500] # the upstream length. run for a list of lengths. Each one produce diferect file
 downstream_context_length = 500                # the downstream length
