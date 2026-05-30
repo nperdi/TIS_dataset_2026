@@ -9,12 +9,12 @@ import subprocess
 ###########################################################
 
 genome_file = "../data/ensembl/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
-annotation_file_name = "../intergenic_region_parsing/output/dist_GT_10000_LT_150000/final/6_Homo_sapiens.GRCh38.116_intergenic_regions_distGT_10000_LT_150000.bed"
+annotation_file_name = "../intergenic_region_parsing/output/dist_GT_4000_LT_300000/final/6_Homo_sapiens.GRCh38.116_intergenic_regions_distGT_4000_LT_300000.bed"
 working_dir = "output/intergenic_TIS/"
 
 num_of_samples = 100000 # maximum number of samples
 relative_start = 0     # in each intergenic region only a subregion is processed.This is the start processing position 
-relative_end = 80000   # in each intergenic region only a subregion is processed.This is the end processing position 
+relative_end = 290000   # in each intergenic region only a subregion is processed.This is the end processing position 
 
 upstream_context_length_list = [100, 300, 500] # the upstream length. run for a list of lengths. Each one produce diferect file
 downstream_context_length = 500                # the downstream length
@@ -81,6 +81,8 @@ if result.returncode != 0:
 # Step 3: Scan for ATG and create candidate negative TIS
 ###########################################################
 
+cnt_in_frame_stop = 0
+count_ATG = 0
 for upstream_context_length in upstream_context_length_list:
     count_tis = 0
 
@@ -124,6 +126,7 @@ for upstream_context_length in upstream_context_length_list:
                 atg_pos = seq.find("ATG", search_pos)
                 if atg_pos == -1:
                     break
+                count_ATG+=1
 
                 window_start = atg_pos - upstream_context_length
                 window_end = atg_pos + 3 + downstream_context_length
@@ -146,6 +149,7 @@ for upstream_context_length in upstream_context_length_list:
                         codon = seq[i:i+3]
                         if codon in stop_codons:
                             has_in_frame_stop = True
+                            cnt_in_frame_stop += 1
                             break
 
                     if has_in_frame_stop:
@@ -183,3 +187,5 @@ for upstream_context_length in upstream_context_length_list:
     print("  FASTA:", intergenic_tis_fa_file_name)
     print("  BED  :", intergenic_tis_bed_file_name)
     print("  Count:", count_tis)
+    print("  ATGs found:", count_ATG)
+    print("  In-frame stops:", cnt_in_frame_stop)
